@@ -1,23 +1,64 @@
-version: '3.8'
+# Learning management system: PostgreSQL + one-shot migration + the Next.js app.
+# Copy .env.example to .env and set SESSION_SECRET, then:  docker compose up --build
+# Demo data (a published course and demo users):          docker compose --profile seed run --rm seed
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lms_pass}
+      POSTGRES_DB: lms_db
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lms -d lms_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Applies database migrations and exits.
+  migrate:
+    build:
+      context: .
+      target: builder
+    command: npx prisma migrate deploy
+    environment:
+      DATABASE_URL: postgresql://lms:${POSTGRES_PASSWORD:-lms_pass}@postgres:5432/lms_db?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   web:
-    build: .
+    build:
+      context: .
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=postgresql://lms:lms_pass@postgres:5432/lms_db?schema=public
+      DATABASE_URL: postgresql://lms:${POSTGRES_PASSWORD:-lms_pass}@postgres:5432/lms_db?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env (at least 32 characters)}
+      # Set to true once the site is served over HTTPS.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     depends_on:
-      - postgres
+      migrate:
+        condition: service_completed_successfully
 
-  postgres:
-    image: postgres:15-alpine
+  seed:
+    profiles: ["seed"]
+    build:
+      context: .
+      target: builder
+    command: npx tsx prisma/seed.ts
     environment:
-      POSTGRES_USER: lms
-      POSTGRES_PASSWORD: lms_pass
-      POSTGRES_DB: lms_db
-    ports:
-      - "5432:5432"
+      DATABASE_URL: postgresql://lms:${POSTGRES_PASSWORD:-lms_pass}@postgres:5432/lms_db?schema=public
+      SEED_INSTRUCTOR_EMAIL: ${SEED_INSTRUCTOR_EMAIL:-instructor@example.com}
+      SEED_STUDENT_EMAIL: ${SEED_STUDENT_EMAIL:-student@example.com}
+      SEED_PASSWORD: ${SEED_PASSWORD:?Set SEED_PASSWORD in .env to create demo users}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:

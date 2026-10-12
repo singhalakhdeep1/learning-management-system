@@ -1,8 +1,10 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,6 +14,47 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm install --include=dev
-      - run: npm run build --if-present
-      - run: npm test --if-present
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run typecheck
+      - run: npm run lint
+      - name: Tests
+        run: |
+          npm test
+          node --test tests/smoke.test.cjs
+      - run: npm run build
+        env:
+          # next build never connects to the database; it only needs a syntactically valid URL.
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lms_db?schema=public
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lms
+          POSTGRES_PASSWORD: lms_pass
+          POSTGRES_DB: lms_db
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U lms -d lms_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://lms:lms_pass@localhost:5432/lms_db?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Apply migrations to an empty database
+        run: npx prisma migrate deploy
+      - name: Seed demo data
+        run: npx tsx prisma/seed.ts
+        env:
+          SEED_INSTRUCTOR_EMAIL: instructor@example.com
+          SEED_PASSWORD: Learn-more-1234

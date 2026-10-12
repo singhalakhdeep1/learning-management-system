@@ -1,9 +1,8 @@
 node_modules
+.next
 .git
-.gitignore
+.github
 .env
-.vscode
-coverage
-dist
-build
+.env.local
 *.log
+coverage
